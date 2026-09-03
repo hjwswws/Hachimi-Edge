@@ -1,0 +1,71 @@
+name: Build Hachimi Zygisk x86_64
+
+on:
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: x86_64-linux-android
+
+      - name: Setup Android NDK
+        uses: nttld/setup-ndk@v1
+        id: setup-ndk
+        with:
+          ndk-version: r27d
+
+      - name: Build x86_64 library
+        run: |
+          set -e
+          NDK="${{ steps.setup-ndk.outputs.ndk-path }}"
+          TOOLCHAIN="$NDK/toolchains/llvm/prebuilt/linux-x86_64"
+          export ANDROID_NDK_ROOT="$NDK"
+          export BINDGEN_EXTRA_CLANG_ARGS="--sysroot=$TOOLCHAIN/sysroot"
+          export RUSTFLAGS="-C link-args=-static-libstdc++ -C link-args=-lc++abi"
+          export CC_x86_64_linux_android="$TOOLCHAIN/bin/x86_64-linux-android24-clang"
+          export CXX_x86_64_linux_android="$TOOLCHAIN/bin/x86_64-linux-android24-clang++"
+          export AR_x86_64_linux_android="$TOOLCHAIN/bin/llvm-ar"
+          export CARGO_TARGET_X86_64_LINUX_ANDROID_LINKER="$TOOLCHAIN/bin/x86_64-linux-android24-clang"
+          cargo build --release --target=x86_64-linux-android --target-dir=build
+
+      - name: Package Zygisk module zip
+        run: |
+          set -e
+          VERSION=$(sed -n 's/^version = "\(.*\)"/\1/p' Cargo.toml | head -1)
+          GIT_COMMIT=$(git rev-parse --short HEAD)
+          VERSION_CODE=$(echo "$VERSION" | awk -F. '{printf "%d", $1*10000+$2*100+$3}')
+          STAGE="/tmp/zygisk-build"
+          ZIP="$GITHUB_WORKSPACE/build/zygisk-hachimi-v${VERSION}-${GIT_COMMIT}-x86_64-release.zip"
+          rm -rf "$STAGE"
+          cp -r tools/android/zygisk-template "$STAGE"
+          mkdir -p "$STAGE/lib/x86_64"
+          cp build/x86_64-linux-android/release/libhachimi.so "$STAGE/lib/x86_64/libhachimi.so"
+          printf '%s\n' \
+            "id=hachimi" \
+            "name=Hachimi" \
+            "version=v${VERSION}-${GIT_COMMIT}" \
+            "versionCode=${VERSION_CODE}" \
+            "author=LeadRDRK" \
+            "description=Hachimi Zygisk module (x86_64)" > "$STAGE/module.prop"
+
+          mapfile -d '' files < <(find "$STAGE" -type f -print0)
+          for f in "${files[@]}"; do
+            (cd "$(dirname "$f")" && sha256sum "$(basename "$f")" > "$(basename "$f").sha256")
+          done
+          cd "$STAGE"
+          zip -FSr6 "$ZIP" .
+          echo "Built: $ZIP"
+
+      - name: Upload Zygisk zip
+        uses: actions/upload-artifact@v7
+        with:
+          name: hachimi-zygisk-x86_64
+          path: build/zygisk-*.zip
