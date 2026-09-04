@@ -1,4 +1,4 @@
-name: Build Hachimi Zygisk x86_64
+name: Build Hachimi Zygisk x86/x86_64
 
 on:
   workflow_dispatch:
@@ -14,7 +14,7 @@ jobs:
       - name: Setup Rust
         uses: dtolnay/rust-toolchain@stable
         with:
-          targets: x86_64-linux-android
+          targets: x86_64-linux-android, i686-linux-android
 
       - name: Setup Android NDK
         uses: nttld/setup-ndk@v1
@@ -22,7 +22,7 @@ jobs:
         with:
           ndk-version: r27d
 
-      - name: Build x86_64 library
+      - name: Build libraries
         run: |
           set -e
           NDK="${{ steps.setup-ndk.outputs.ndk-path }}"
@@ -34,7 +34,11 @@ jobs:
           export CXX_x86_64_linux_android="$TOOLCHAIN/bin/x86_64-linux-android24-clang++"
           export AR_x86_64_linux_android="$TOOLCHAIN/bin/llvm-ar"
           export CARGO_TARGET_X86_64_LINUX_ANDROID_LINKER="$TOOLCHAIN/bin/x86_64-linux-android24-clang"
-          cargo build --release --target=x86_64-linux-android --target-dir=build
+          export CC_i686_linux_android="$TOOLCHAIN/bin/i686-linux-android24-clang"
+          export CXX_i686_linux_android="$TOOLCHAIN/bin/i686-linux-android24-clang++"
+          export AR_i686_linux_android="$TOOLCHAIN/bin/llvm-ar"
+          export CARGO_TARGET_I686_LINUX_ANDROID_LINKER="$TOOLCHAIN/bin/i686-linux-android24-clang"
+          cargo build --release --target=x86_64-linux-android --target=i686-linux-android --target-dir=build
 
       - name: Package Zygisk module zip
         run: |
@@ -43,10 +47,11 @@ jobs:
           GIT_COMMIT=$(git rev-parse --short HEAD)
           VERSION_CODE=$(echo "$VERSION" | awk -F. '{printf "%d", $1*10000+$2*100+$3}')
           STAGE="/tmp/zygisk-build"
-          ZIP="$GITHUB_WORKSPACE/build/zygisk-hachimi-v${VERSION}-${GIT_COMMIT}-x86_64-release.zip"
+          ZIP="$GITHUB_WORKSPACE/build/zygisk-hachimi-v${VERSION}-${GIT_COMMIT}-x86_x86_64-release.zip"
           rm -rf "$STAGE"
           cp -r tools/android/zygisk-template "$STAGE"
-          mkdir -p "$STAGE/lib/x86_64"
+          mkdir -p "$STAGE/lib/x86" "$STAGE/lib/x86_64"
+          cp build/i686-linux-android/release/libhachimi.so "$STAGE/lib/x86/libhachimi.so"
           cp build/x86_64-linux-android/release/libhachimi.so "$STAGE/lib/x86_64/libhachimi.so"
           printf '%s\n' \
             "id=hachimi" \
@@ -54,7 +59,7 @@ jobs:
             "version=v${VERSION}-${GIT_COMMIT}" \
             "versionCode=${VERSION_CODE}" \
             "author=LeadRDRK" \
-            "description=Hachimi Zygisk module (x86_64)" > "$STAGE/module.prop"
+            "description=Hachimi Zygisk module (x86 + x86_64)" > "$STAGE/module.prop"
 
           mapfile -d '' files < <(find "$STAGE" -type f -print0)
           for f in "${files[@]}"; do
@@ -67,5 +72,5 @@ jobs:
       - name: Upload Zygisk zip
         uses: actions/upload-artifact@v7
         with:
-          name: hachimi-zygisk-x86_64
+          name: hachimi-zygisk-x86-x86_64
           path: build/zygisk-*.zip
