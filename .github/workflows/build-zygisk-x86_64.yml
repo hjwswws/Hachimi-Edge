@@ -58,7 +58,7 @@ jobs:
 
           mapfile -d '' files < <(find "$STAGE" -type f -print0)
           for f in "${files[@]}"; do
-            (cd "$(dirname "$f")" && sha256sum "$(basename "$f")" > "$(basename "$f").sha256")
+            sha256sum "$f" | awk '{print $1}' > "$f.sha256"
           done
           cd "$STAGE"
           zip -FSr6 "$ZIP" .
